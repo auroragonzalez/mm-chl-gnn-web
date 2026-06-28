@@ -1,0 +1,108 @@
+<graph id="Graph">
+  <version>1.0</version>
+  
+  <node id="Read">
+    <operator>Read</operator>
+    <sources/>
+    <parameters class="com.bc.ceres.binding.dom.XppDomElement">
+      <useAdvancedOptions>false</useAdvancedOptions>
+      <file>${inputFile}</file>
+      <copyMetadata>true</copyMetadata>
+    </parameters>
+  </node>
+  
+  <node id="Resample">
+    <operator>Resample</operator>
+    <sources>
+      <sourceProduct refid="Read"/>
+    </sources>
+    <parameters class="com.bc.ceres.binding.dom.XppDomElement">
+      <referenceBand/>
+      <targetWidth/>
+      <targetHeight/>
+      <targetResolution>${resampleResolution}</targetResolution>
+      <upsampling>Nearest</upsampling>
+      <downsampling>First</downsampling>
+      <flagDownsampling>First</flagDownsampling>
+      <resamplingPreset/>
+      <bandResamplings/>
+      <resampleOnPyramidLevels>true</resampleOnPyramidLevels>
+    </parameters>
+  </node>
+  
+  <node id="Subset1">
+    <operator>Subset</operator>
+    <sources>
+      <sourceProduct refid="Resample"/>
+    </sources>
+    <parameters class="com.bc.ceres.binding.dom.XppDomElement">
+      <sourceBands/>
+      <tiePointGrids/>
+      <region>0,0,0,0</region>
+      <referenceBand/>
+      <geoRegion>${geoRegion}</geoRegion>
+      <subSamplingX>1</subSamplingX>
+      <subSamplingY>1</subSamplingY>
+      <fullSwath>false</fullSwath>
+      <copyMetadata>true</copyMetadata>
+    </parameters>
+  </node>
+  
+    <node id="C2RCC">
+    <operator>c2rcc.msi</operator>
+    <sources>
+	<sourceProduct refid="Subset1"/>
+    </sources>
+     <parameters>
+      <salinity>${salinity}</salinity>
+      <temperature>${temperature}</temperature>
+      <ozone>330</ozone>
+      <press>1000</press>
+      <TSMfakBpart>1.72</TSMfakBpart>
+      <TSMfakBwit>3.1</TSMfakBwit>
+      <CHLexp>1.04</CHLexp>
+      <CHLfak>21</CHLfak>
+      <thresholdRtosaOOS>0.005</thresholdRtosaOOS>
+      <thresholdAcReflecOos>0.1</thresholdAcReflecOos>
+      <thresholdCloudTDown865>0.955</thresholdCloudTDown865>
+      <netSet>${netSet}</netSet>
+      <outputAsRrs>false</outputAsRrs>
+      <deriveRwFromPathAndTransmittance>false</deriveRwFromPathAndTransmittance>
+      <useEcmwfAuxData>true</useEcmwfAuxData>
+      <outputRtoa>${outputRtoa}</outputRtoa>
+      <outputRtosaGc>false</outputRtosaGc>
+      <outputRtosaGcAann>false</outputRtosaGcAann>
+      <outputRpath>false</outputRpath>
+      <outputTdown>false</outputTdown>
+      <outputTup>false</outputTup>
+      <outputAcReflectance>${outputAcReflectance}</outputAcReflectance>
+      <outputRhown>${outputRhown}</outputRhown>
+      <outputOos>false</outputOos>
+      <outputKd>false</outputKd>
+      <outputUncertainties>false</outputUncertainties>
+    </parameters>
+  </node>
+  
+  <node id="Subset2">
+  <operator>Subset</operator>
+  <sources>
+    <sourceProduct refid="C2RCC"/>
+  </sources>
+  <parameters>
+    <sourceBands>${bandSubset}</sourceBands>
+    <copyMetadata>true</copyMetadata>
+  </parameters>
+  </node>
+
+  <node id="Write">
+    <operator>Write</operator>
+    <sources>
+      <sourceProduct refid="Subset2"/>
+    </sources>
+    <parameters class="com.bc.ceres.binding.dom.XppDomElement">
+      <file>${outputFile}</file>
+      <formatName>${outputFormat}</formatName>
+    </parameters>
+  </node>
+
+</graph>

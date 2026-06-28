@@ -1,0 +1,43 @@
+# Rutas de entrada/salida del pipeline (dentro del contenedor)
+safe_dir: "/app/data/Copernicus/"
+snap_dir: "/app/data/processed/"
+pred_dir: "/app/data/preds/"
+map_dir: "/app/data/Chl_Maps/"
+geojson_file: "/app/fetch/marmenor_polygon.geojson"
+bathymetry_map: "/app/fetch/MarMenorBathymetry.kml"
+colormap_file: "/app/fetch/colormap_custom.txt"
+
+profundidades: [0_1, 1_2, 2_3, 3_4]
+generate_gif: true
+plot_individuales: true
+
+# CSV donde se registran los tiempos de inferencia GNN (persistente en Chl_Maps).
+timings_csv: "/app/data/Chl_Maps/inference_times.csv"
+
+# Si la fecha solicitada no tiene producto Sentinel-2 sobre la laguna, buscar la
+# adquisicion mas cercana en +-N dias (0 = exigir la fecha exacta).
+search_window_days: 7
+
+# Filtrado por nubosidad: con credenciales CDS, se prioriza la fecha mas cercana
+# con nubes <= este umbral (%). 100 = no filtrar por nubes. Sin credenciales CDS
+# el filtro se ignora (solo cercania).
+max_cloud_cover: 20
+
+# === Configuracion de la GNN ===============================================
+# Los checkpoints entrenados (.pt + _config.json + _scaler.pkl + _feature_cols.json)
+# se montan en `model_dir` al ejecutar el contenedor (no van en git). Ajusta
+# `selection` para que cada profundidad apunte al dataset con el que se entreno el
+# modelo y al DataFrame de features correspondiente.
+gnn:
+  model_dir: "/app/gnn_models"
+  model_name: "GraphSAGE"
+  knn_k: 8
+  device: "cpu"
+  # Modelos GraphSAGE entrenados sobre C2X-Complex_rhow con ventana 5x5 (la unica
+  # ventana disponible para las 4 profundidades; mantener una sola ventana es
+  # obligatorio porque las 4 profundidades comparten la misma rejilla de pixeles).
+  selection:
+    "0_1": { dataset_name: "C2X-Complex_rhow_5x5_depth_in_0_1", input_df: "df_tifs_C2X-Complex_rhow_5x5" }
+    "1_2": { dataset_name: "C2X-Complex_rhow_5x5_depth_in_1_2", input_df: "df_tifs_C2X-Complex_rhow_5x5" }
+    "2_3": { dataset_name: "C2X-Complex_rhow_5x5_depth_in_2_3", input_df: "df_tifs_C2X-Complex_rhow_5x5" }
+    "3_4": { dataset_name: "C2X-Complex_rhow_5x5_depth_in_3_4", input_df: "df_tifs_C2X-Complex_rhow_5x5" }

@@ -1,0 +1,28 @@
+# --- Web ---
+fastapi
+uvicorn[standard]
+python-multipart
+PyYAML
+
+# --- GNN (inferencia) ---
+# torch es build CPU; para GPU instalar la wheel CUDA correspondiente de pytorch.org
+torch==2.11.0
+torch_geometric==2.7.0
+
+# --- Procesado geoespacial / features / E-S ---
+numpy
+pandas
+scikit-learn
+rasterio
+geopandas
+fiona
+shapely
+pyproj
+imageio
+matplotlib
+
+# --- Descarga Sentinel-2 / Copernicus ---
+boto3
+botocore
+requests
+sentinelhub

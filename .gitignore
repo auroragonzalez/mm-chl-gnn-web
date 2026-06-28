@@ -1,0 +1,45 @@
+# === AI assistant artifacts (never commit) ===
+CLAUDE.md
+**/CLAUDE.md
+CLAUDE.local.md
+**/CLAUDE.local.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md
+
+# Python
+__pycache__/
+*.py[cod]
+.python-version
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets / credenciales Copernicus (S3 + OAuth)
+.env
+
+# Checkpoints GNN (se montan en runtime; pesados/binarios)
+gnn_models/*
+!gnn_models/.gitkeep
+*.pt
+*.pth
+*.pkl
+*.joblib
+
+# Datos y salidas generadas
+data/
+!data/.gitkeep
+
+# Rasters / mapas generados
+*.tif
+*.tiff
+*.gif
+
+# OS / editor
+.DS_Store
+.Rhistory
