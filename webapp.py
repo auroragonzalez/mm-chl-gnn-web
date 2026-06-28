@@ -369,4 +369,8 @@ def _escape(s: str) -> str:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("webapp:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    # Usar el puerto que inyecte la plataforma (PORT o SERVER_PORT); si no, 8000.
+    # Siempre en 0.0.0.0 para que sea accesible desde fuera del contenedor.
+    port = int(os.getenv("PORT") or os.getenv("SERVER_PORT") or "8000")
+    print(f"[webapp] escuchando en 0.0.0.0:{port}")
+    uvicorn.run("webapp:app", host="0.0.0.0", port=port)
