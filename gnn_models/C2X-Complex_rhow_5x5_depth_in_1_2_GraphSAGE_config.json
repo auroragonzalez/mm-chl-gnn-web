@@ -1,0 +1,14 @@
+{
+  "model_name": "GraphSAGE",
+  "model_kwargs": {
+    "in_channels": 56,
+    "hidden_channels": 64,
+    "num_layers": 5,
+    "dropout": 0.14560681984590432,
+    "residual": true,
+    "aggr": "max"
+  },
+  "lr": 0.004549841947044477,
+  "weight_decay": 7.926320944645679e-05,
+  "loss_name": "huber_log"
+}

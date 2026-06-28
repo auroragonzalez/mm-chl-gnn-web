@@ -1,8 +1,0 @@
-cd /home/aurorax/Git_repos/mar-menor-chl-webapp
-sudo docker build -t chlwebapp .
-sudo docker run -it --rm --network lowmtu -p 8000:8000 \
-  -v "$(pwd)/gnn_models":/app/gnn_models \
-  -v "$(pwd)/data/Chl_Maps":/app/data/Chl_Maps \
-  -v "$(pwd)/data/preds":/app/data/preds \
-  -v "$(pwd)/data/processed":/app/data/processed \
-  chlwebapp

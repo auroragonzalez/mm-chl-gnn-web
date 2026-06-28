@@ -1,0 +1,14 @@
+{
+  "model_name": "GraphSAGE",
+  "model_kwargs": {
+    "in_channels": 56,
+    "hidden_channels": 256,
+    "num_layers": 3,
+    "dropout": 0.3449191616516507,
+    "residual": true,
+    "aggr": "mean"
+  },
+  "lr": 0.004793879172692726,
+  "weight_decay": 1.0143998559501075e-06,
+  "loss_name": "rmsle"
+}

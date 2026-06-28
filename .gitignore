@@ -23,13 +23,20 @@ env/
 # Secrets / credenciales Copernicus (S3 + OAuth)
 .env
 
-# Checkpoints GNN (se montan en runtime; pesados/binarios)
-gnn_models/*
-!gnn_models/.gitkeep
+# Modelos: por defecto no se versionan binarios de modelo...
 *.pt
 *.pth
 *.pkl
 *.joblib
+# ...salvo los checkpoints de despliegue de gnn_models/ (pequeños, ~3.4 MB en
+# total), que SI se versionan para que la app web funcione al clonar el repo.
+!gnn_models/*.pt
+!gnn_models/*.pkl
+!gnn_models/*.json
+
+# Ayudas locales (no forman parte de la app)
+run_webapp.txt
+push_repo.txt
 
 # Datos y salidas generadas
 data/
