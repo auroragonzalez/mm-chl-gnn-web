@@ -42,9 +42,15 @@ COPY webapp.py .
 COPY config.yaml .
 COPY check_dates.py .
 
+# Checkpoints GNN de despliegue: van horneados en la imagen para que la app
+# funcione sin montar ningun volumen (en local se pueden sobrescribir con
+# -v "$(pwd)/gnn_models":/app/gnn_models). NO declarar /app/gnn_models como
+# VOLUME: un volumen anonimo podria ocultar estos ficheros en algunas plataformas.
+COPY gnn_models/ ./gnn_models/
+
 # Carpetas de trabajo / resultados
-RUN mkdir -p /app/data/Chl_Maps /app/data/preds /app/data/processed /app/data/Copernicus /app/gnn_models
-VOLUME ["/app/data/Chl_Maps", "/app/gnn_models"]
+RUN mkdir -p /app/data/Chl_Maps /app/data/preds /app/data/processed /app/data/Copernicus
+VOLUME ["/app/data/Chl_Maps"]
 
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 ENV SNAP_JAVA_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED"
