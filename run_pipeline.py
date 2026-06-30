@@ -133,27 +133,82 @@ print("\nPipeline completado correctamente.")
 print(f"Tiempo total del pipeline: {t_total:.2f} s ({t_total/60:.2f} min)")
 print(f"TOTAL_TIME_S: {t_total:.2f}")            # lo captura webapp.py para la UI
 
+# --- Validez del resultado --------------------------------------------------
+# Si TODOS los mapas de profundidad son de un solo color (todos los pixeles
+# iguales), la imagen Sentinel-2 de origen no tenia calidad suficiente para que
+# el pipeline funcione bien: marcamos el resultado como no valido y avisamos.
+def _depth_is_flat(tif_path, tol=1e-4):
+    """True si el mapa no tiene variacion real (un solo color); None si no se lee."""
+    try:
+        import numpy as np
+        import rasterio
+        with rasterio.open(tif_path) as src:
+            arr = src.read(1)
+    except Exception:                              # noqa: BLE001
+        return None
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return True                                # sin datos -> degenerado
+    return float(np.ptp(finite)) <= tol
+
+_flat = [
+    _depth_is_flat(f"{map_dir}{fecha}_chl_map_{d}.tif")
+    for d in ("0_1", "1_2", "2_3", "3_4")
+]
+_known = [c for c in _flat if c is not None]
+# Valido si hay al menos un mapa con variacion real; si no se pudo leer ninguno,
+# no penalizamos (se asume valido).
+map_valid = any(c is False for c in _known) if _known else True
+print(f"MAP_VALID: {str(map_valid).lower()}")     # lo captura webapp.py para la UI
+if not map_valid:
+    print("[aviso] Todos los mapas son de un solo color: la imagen Sentinel-2 de "
+          "origen no tenia calidad suficiente. Prueba con otra fecha.")
+
 # --- CSV unico con TODAS las fases (persistente) -------------------------------
 timings_csv = cfg.get("timings_csv", os.path.join(map_dir, "inference_times.csv"))
+CSV_HEADER = [
+    "timestamp", "requested_date", "resolved_date", "n_pixels",
+    "download_s", "snap_s", "feateng_s", "infer_s",
+    "prediction_phase_s", "tiff_s", "plots_s", "gif_s", "total_s", "valid",
+]
 try:
     os.makedirs(os.path.dirname(timings_csv), exist_ok=True)
-    write_header = not os.path.isfile(timings_csv)
-    with open(timings_csv, "a", newline="") as f:
-        w = csv.writer(f)
-        if write_header:
-            w.writerow([
-                "timestamp", "requested_date", "resolved_date", "n_pixels",
-                "download_s", "snap_s", "feateng_s", "infer_s",
-                "prediction_phase_s", "tiff_s", "plots_s", "gif_s", "total_s",
-            ])
-        def _f(x):
-            return f"{x:.3f}" if isinstance(x, (int, float)) and x == x else ""  # x==x => no NaN
-        w.writerow([
-            datetime.now().isoformat(timespec="seconds"),
-            requested_date, fecha, n_pixels,
-            _f(t_download), _f(t_snap), _f(feateng_s), _f(infer_s),
-            _f(t_predict), _f(t_tiff), _f(t_plots), _f(t_gif), _f(t_total),
-        ])
+
+    # Migracion: si ya existe un CSV sin la columna "valid", se reescribe la
+    # cabecera y se rellena la nueva columna como vacia en las filas previas.
+    old_rows = None
+    if os.path.isfile(timings_csv):
+        with open(timings_csv, newline="") as f:
+            existing = list(csv.reader(f))
+        if existing and "valid" not in existing[0]:
+            old_rows = existing[1:]
+
+    def _f(x):
+        return f"{x:.3f}" if isinstance(x, (int, float)) and x == x else ""  # x==x => no NaN
+
+    new_row = [
+        datetime.now().isoformat(timespec="seconds"),
+        requested_date, fecha, n_pixels,
+        _f(t_download), _f(t_snap), _f(feateng_s), _f(infer_s),
+        _f(t_predict), _f(t_tiff), _f(t_plots), _f(t_gif), _f(t_total),
+        "TRUE" if map_valid else "FALSE",
+    ]
+
+    if old_rows is not None:
+        # Reescribir con la cabecera nueva, rellenando "valid" vacio en lo antiguo.
+        with open(timings_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(CSV_HEADER)
+            for r in old_rows:
+                w.writerow(r + [""])
+            w.writerow(new_row)
+    else:
+        write_header = not os.path.isfile(timings_csv)
+        with open(timings_csv, "a", newline="") as f:
+            w = csv.writer(f)
+            if write_header:
+                w.writerow(CSV_HEADER)
+            w.writerow(new_row)
     print(f"Tiempos registrados en {timings_csv}")
 except OSError as e:
     print(f"[aviso] no se pudo escribir el CSV de tiempos ({e})")
