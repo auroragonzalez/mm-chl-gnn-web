@@ -29,6 +29,16 @@ RUN wget -O /tmp/snap_installer_12.sh "https://download.esa.int/step/snap/12.0/i
     /tmp/snap_installer_12.sh -q -dir /opt/snap && \
     rm /tmp/snap_installer_12.sh
 
+# Acotar la memoria de la JVM de SNAP para que quepa en la RAM disponible.
+# Sin esto gpt intenta reservar ~32G; con poca RAM libre agota el swap y la
+# correccion atmosferica produce reflectancias degeneradas de forma no
+# determinista (mapas de un solo color unas veces si y otras no).
+# Ajustar a la RAM real de la maquina/plataforma:
+#   docker build --build-arg SNAP_JVM_XMX=8G -t chlwebapp .
+ARG SNAP_JVM_XMX=4G
+RUN sed -i '/^-Xmx/d' /opt/snap/bin/gpt.vmoptions && \
+    echo "-Xmx${SNAP_JVM_XMX}" >> /opt/snap/bin/gpt.vmoptions
+
 # === Proyecto ===
 WORKDIR /app
 COPY requirements.txt .

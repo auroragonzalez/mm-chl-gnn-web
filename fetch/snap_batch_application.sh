@@ -72,7 +72,22 @@ for input_file in "$INPUT_DIR"/*.SAFE.zip; do
     sed "s|inputFile=.*|inputFile=$input_file|; s|outputFile=.*|outputFile=$output_file|" "$TEMPLATE_PARAMS" > "$param_file"
 
     # Ejecutar gpt
+    #  -c  limita la cache de tiles (debe ser < -Xmx de gpt.vmoptions, fijado en el Dockerfile)
+    #  -q  limita el paralelismo
+    # Ambos acotan el pico de memoria y hacen el procesado mas determinista:
+    # sin ellos la correccion atmosferica puede degenerar y salir un mapa de un solo color.
     echo "Procesando $filename → $output_file"
-    "$GPT" "$GRAPH_XML" -p "$param_file"
+    "$GPT" "$GRAPH_XML" -p "$param_file" -c "${SNAP_TILE_CACHE:-2G}" -q "${SNAP_PARALLELISM:-4}"
+    gpt_status=$?
+    if [ "$gpt_status" -ne 0 ]; then
+        echo "ERROR: gpt fallo para $filename (codigo $gpt_status). Abortando." >&2
+        exit 1
+    fi
+
+    # La correccion atmosferica debe haber generado un TIFF no vacio.
+    if [ ! -s "$output_file" ]; then
+        echo "ERROR: no se genero el TIFF de salida $output_file. Abortando." >&2
+        exit 1
+    fi
 done
 

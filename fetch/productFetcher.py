@@ -2,7 +2,6 @@ import boto3
 from botocore.config import Config
 import datetime
 import os
-import csv
 import argparse
 import sys
 
@@ -32,8 +31,8 @@ _boto_cfg = Config(
     retries={"max_attempts": 5, "mode": "standard"},
 )
 
-session = boto3.session.Session()
-s3 = session.resource(
+# Cliente S3 de Copernicus Data Space Ecosystem.
+s3 = boto3.client(
     's3',
     endpoint_url='https://eodata.dataspace.copernicus.eu',
     aws_access_key_id=ACCESS_KEY,
@@ -41,8 +40,7 @@ s3 = session.resource(
     region_name='default',
     config=_boto_cfg,
 )
-
-bucket = s3.Bucket("eodata")
+BUCKET = "eodata"
 
 target_date = datetime.datetime.strptime(str(args.date), "%Y-%m-%d").date()
 WINDOW = max(0, int(args.window))
@@ -53,41 +51,74 @@ CDS_SECRET = os.getenv("CDS_SECRET")
 # Tile ID a buscar
 tile_id = "30SXG"
 
-# Prefijos base de búsqueda: L1C_N0500 o L1C
-#prefixes = [f"Sentinel-2/MSI/L1C_N0500/{fecha.year}/{fecha.month:02d}/{fecha.day:02d}/" for fecha in fechas]
-#prefixes = [f"Sentinel-2/MSI/L1C/{fecha.year}/{fecha.month:02d}/{fecha.day:02d}/" for fecha in fechas]
+# Órbita que cubre por completo el Mar Menor (S2 ~10:46). La órbita adyacente
+# (p. ej. R094) solo roza el borde del tile y produce una escena casi vacía.
+preferred_orbit = "R051"
 
 # Carpeta local destino
 output_dir = args.output
 
+# Prefijos base de búsqueda: primero L1C_N0500 (baselines antiguos), luego L1C
 prefix_patterns = [
     "Sentinel-2/MSI/L1C_N0500/{y}/{m:02d}/{d:02d}/",
     "Sentinel-2/MSI/L1C/{y}/{m:02d}/{d:02d}/"
 ]
 
-def download_product(bucket, prefix: str, tile_id: str, target_root: str):
-    """
-    Busca y descarga un producto SAFE que contenga el tile_id en el prefijo dado.
-    Devuelve el nombre del producto descargado o None si no encuentra nada.
-    """
-    found = False
-    for obj in bucket.objects.filter(Prefix=prefix):
-        if obj.key.endswith('.SAFE/') and tile_id in obj.key:
-            found = True
-            product_prefix = obj.key
-            print(f"Producto encontrado: {product_prefix}")
-            local_target = os.path.join(target_root, os.path.basename(product_prefix.rstrip('/')))
-            for file_obj in bucket.objects.filter(Prefix=product_prefix):
-                local_path = os.path.join(local_target, os.path.relpath(file_obj.key, product_prefix))
-                os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                if not file_obj.key.endswith('/'):  # evitar carpetas virtuales
-                    print(f"Descargando {file_obj.key} → {local_path}")
-                    bucket.download_file(file_obj.key, local_path)
-            return product_prefix
-    if not found:
-        print(f"No se encontró producto SAFE con tile {tile_id} en {prefix}")
-    return None
 
+def list_subfolders(prefix):
+    """Subcarpetas (CommonPrefixes) bajo 'prefix' con navegación jerárquica (Delimiter='/').
+
+    CDSE sirve eodata como un almacén jerárquico: el listado plano ya no
+    devuelve nada y los marcadores '.SAFE/' de carpeta han desaparecido, así
+    que hay que navegar con Delimiter.
+    """
+    paginator = s3.get_paginator('list_objects_v2')
+    subfolders = []
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix, Delimiter='/'):
+        for cp in page.get('CommonPrefixes', []):
+            subfolders.append(cp['Prefix'])
+    return subfolders
+
+
+def iter_files(prefix):
+    """Genera recursivamente todas las claves de fichero bajo 'prefix'."""
+    paginator = s3.get_paginator('list_objects_v2')
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix, Delimiter='/'):
+        for obj in page.get('Contents', []):
+            if not obj['Key'].endswith('/'):  # ignorar marcadores de carpeta
+                yield obj['Key']
+        for cp in page.get('CommonPrefixes', []):
+            yield from iter_files(cp['Prefix'])
+
+
+def find_product(prefix, tile_id, preferred_orbit=None):
+    """Devuelve el prefijo de la carpeta .SAFE con el tile buscado.
+
+    Si hay varios productos para el tile (habitual ahora: R051 + una órbita
+    adyacente), prioriza 'preferred_orbit'.
+    """
+    candidates = [
+        p for p in list_subfolders(prefix)
+        if p.rstrip('/').endswith('.SAFE') and tile_id in p
+    ]
+    if not candidates:
+        return None
+    if preferred_orbit:
+        preferidos = [p for p in candidates if f"_{preferred_orbit}_" in p]
+        if preferidos:
+            return sorted(preferidos)[0]
+    return sorted(candidates)[0]
+
+
+def download_product(product_prefix, target_root):
+    """Descarga recursivamente todos los ficheros del producto SAFE."""
+    local_target = os.path.join(target_root, os.path.basename(product_prefix.rstrip('/')))
+    for key in iter_files(product_prefix):
+        local_path = os.path.join(local_target, os.path.relpath(key, product_prefix))
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        print(f"Descargando {key} → {local_path}", flush=True)
+        s3.download_file(BUCKET, key, local_path)
+    return product_prefix
 
 
 def candidate_dates(target, window):
@@ -147,14 +178,17 @@ def main():
     resolved = None
     for fecha in order:
         cc = f" (nubes {cloud_map[fecha]:.0f}%)" if cloud_map and fecha in cloud_map else ""
-        print(f"\nProcesando fecha {fecha.strftime('%Y-%m-%d')}{cc}")
+        print(f"\nProcesando fecha {fecha.strftime('%Y-%m-%d')}{cc}", flush=True)
         for pattern in prefix_patterns:
             prefix = pattern.format(y=fecha.year, m=fecha.month, d=fecha.day)
-            print(f"Buscando productos en: {prefix}")
-            result = download_product(bucket, prefix, tile_id, output_dir)
-            if result:
+            print(f"Buscando productos en: {prefix}", flush=True)
+            product = find_product(prefix, tile_id, preferred_orbit)
+            if product:
+                print(f"Producto encontrado: {product}", flush=True)
+                download_product(product, output_dir)
                 resolved = fecha
                 break
+            print(f"No se encontró producto SAFE con tile {tile_id} en {prefix}", flush=True)
         if resolved:
             break
 
