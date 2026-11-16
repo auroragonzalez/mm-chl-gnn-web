@@ -35,6 +35,9 @@ gnn:
   # situados en las 5 boyas mas cercanas (reproduce el grafo de entrenamiento);
   # "pixel" = grafo k-NN de pixeles adyacentes (version original, ~2x RMSLE).
   graph_mode: "station"
+  # Radio (m) de mezcla de conjuntos de anclas: suaviza las costuras rectas donde
+  # cambia el conjunto de las 5 boyas mas cercanas. 0 = asignacion dura.
+  anchor_blend_m: 500
   knn_k: 8                    # solo se usa con graph_mode: "pixel"
   device: "cpu"
   # Modelos GraphSAGE entrenados sobre C2X-Complex_rhow con ventana 5x5 (la unica

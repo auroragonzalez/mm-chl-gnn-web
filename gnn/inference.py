@@ -146,10 +146,86 @@ def _build_pixel_graph(
     return np.array(sorted(edge_set), dtype=np.int64).T
 
 
+def _disk_offsets(radius: float, n_rings: int = 4) -> np.ndarray:
+    """Centro + ``n_rings`` anillos concentricos de 6, 12, 18, ... puntos:
+    muestreo casi uniforme del disco de ese radio (61 puntos con n_rings=4)."""
+    pts = [(0.0, 0.0)]
+    for j in range(1, n_rings + 1):
+        r = radius * j / n_rings
+        a = 2 * np.pi * np.arange(6 * j) / (6 * j) + (np.pi / (6 * j)) * (j % 2)
+        pts += list(zip(r * np.cos(a), r * np.sin(a)))
+    return np.asarray(pts, dtype=np.float64)
+
+
+_BLEND_CACHE: dict = {}
+
+
+def _blended_anchor_sets(
+    pix_coords: np.ndarray,
+    anchor_coords: np.ndarray,
+    spatial_k: int = 5,
+    radius: float = 500.0,
+    n_rings: int = 4,
+):
+    """
+    Asignacion suave de pixeles a conjuntos de anclas (elimina las costuras).
+
+    Con asignacion dura cada pixel escucha a sus ``spatial_k`` anclas mas
+    cercanas; ese conjunto es constante en regiones poligonales y cambia de
+    golpe en sus bordes, y el mapa muestra costuras rectas (mas aun con
+    agregacion max). Aqui el conjunto de las ``spatial_k`` mas cercanas se
+    evalua en puntos repartidos uniformemente en un disco de ``radius`` metros
+    alrededor del pixel, y el pixel se predice una vez por cada conjunto
+    distinto con peso = fraccion del disco en la que rige ese conjunto. Los
+    pesos varian de forma continua con la posicion: la prediccion pasa
+    gradualmente de un conjunto al siguiente en una franja de ~2*radius; dentro
+    de una region el resultado es identico a la asignacion dura. Las features
+    del propio pixel no se tocan.
+
+    Devuelve ``(row_pix, row_sets, row_w)``: para cada par (pixel, conjunto) el
+    indice del pixel, los (spatial_k,) indices de anclas y el peso.
+    """
+    key = (pix_coords.shape, hash(pix_coords.tobytes()), hash(anchor_coords.tobytes()),
+           spatial_k, radius, n_rings)
+    if _BLEND_CACHE.get("key") == key:  # misma rejilla y anclas en las 4 profundidades
+        return _BLEND_CACHE["val"]
+    P, A = len(pix_coords), len(anchor_coords)
+    k = min(spatial_k, A - 1)
+    if A > 62:
+        raise ValueError("la mezcla de anclas codifica conjuntos en 64 bits (<= 62 anclas)")
+    off = _disk_offsets(radius, n_rings)
+    S = len(off)
+    ax, ay = anchor_coords[:, 0], anchor_coords[:, 1]
+    rp, rc, rn = [], [], []
+    for s in range(0, P, 8192):  # memoria acotada: bloque x S x A distancias
+        c = pix_coords[s:s + 8192]
+        px = (c[:, 0:1] + off[None, :, 0]).reshape(-1, 1)
+        py = (c[:, 1:2] + off[None, :, 1]).reshape(-1, 1)
+        d2 = (px - ax[None, :]) ** 2 + (py - ay[None, :]) ** 2
+        idx = np.argpartition(d2, k - 1, axis=1)[:, :k].astype(np.int64)
+        codes = np.sort(np.bitwise_or.reduce(np.left_shift(np.int64(1), idx), axis=1)
+                        .reshape(len(c), S), axis=1)
+        new = np.ones_like(codes, dtype=bool)
+        new[:, 1:] = codes[:, 1:] != codes[:, :-1]
+        starts = np.flatnonzero(new.ravel())  # cada fila empieza un tramo nuevo
+        rp.append(s + starts // S)
+        rc.append(codes.ravel()[starts])
+        rn.append(np.diff(np.append(starts, codes.size)))
+    row_pix = np.concatenate(rp)
+    row_w = np.concatenate(rn).astype(np.float64) / S
+    uniq, inv = np.unique(np.concatenate(rc), return_inverse=True)
+    bits = np.arange(A, dtype=np.int64)
+    set_table = np.stack([bits[(int(u) >> bits) & 1 == 1] for u in uniq])
+    out = (row_pix, set_table[inv], row_w)
+    _BLEND_CACHE.update(key=key, val=out)
+    return out
+
+
 def _station_anchored_graph(
     pix_coords: np.ndarray,
     anchor_coords: np.ndarray,
     spatial_k: int = 5,
+    pix_sets: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Grafo de despliegue que reproduce los vecindarios del entrenamiento.
@@ -165,6 +241,9 @@ def _station_anchored_graph(
     observaciones de boya no vistas, el grafo de pixeles adyacentes casi
     duplica el RMSLE; este grafo cuesta 0.03-0.07 (ver el articulo, sec. 7.2).
 
+    ``pix_sets`` (P, spatial_k) fija opcionalmente las anclas que escucha cada
+    pixel (ver ``_blended_anchor_sets``); por defecto, las mas cercanas.
+
     Devuelve edge_index con las anclas indexadas despues de los P pixeles.
     """
     P, A = len(pix_coords), len(anchor_coords)
@@ -175,7 +254,10 @@ def _station_anchored_graph(
         for j in ia[i, 1:]:
             src += [P + j, P + i]
             dst += [P + i, P + j]
-    _, ip = NearestNeighbors(n_neighbors=k).fit(anchor_coords).kneighbors(pix_coords)
+    if pix_sets is None:
+        _, ip = NearestNeighbors(n_neighbors=k).fit(anchor_coords).kneighbors(pix_coords)
+    else:
+        ip = np.asarray(pix_sets, dtype=np.int64)
     src = np.concatenate([np.asarray(src, dtype=np.int64), (P + ip).ravel()])
     dst = np.concatenate([np.asarray(dst, dtype=np.int64), np.repeat(np.arange(P), k)])
     return np.stack([src, dst]).astype(np.int64)
@@ -200,6 +282,7 @@ def predict_pixels_gnn(
     batch_size: int = 50_000,
     graph_mode: str = "station",
     anchor_coords: Optional[np.ndarray] = None,
+    anchor_blend_m: float = 0.0,
 ) -> np.ndarray:
     """
     Run GNN inference on pixel-level features.
@@ -252,6 +335,21 @@ def predict_pixels_gnn(
         batch_feat = features[start:end]
         batch_coords = coords[start:end]
 
+        if graph_mode == "station" and anchor_blend_m > 0:
+            # Mezcla de conjuntos de anclas (sin costuras), en espacio log1p
+            rp, rs, rw = _blended_anchor_sets(batch_coords, anchor_coords,
+                                              radius=anchor_blend_m)
+            edge_index = _station_anchored_graph(batch_coords[rp], anchor_coords,
+                                                 pix_sets=rs)
+            x = np.concatenate([batch_feat[rp], anchor_feat]).astype(np.float32)
+            with torch.no_grad():
+                p = model(torch.from_numpy(x).to(device),
+                          torch.from_numpy(edge_index).to(device))
+            p = p[: len(rp)].cpu().numpy().astype(np.float64)
+            logp = np.bincount(rp, weights=rw * np.log1p(np.clip(p, 0, None)),
+                               minlength=end - start)
+            all_preds[start:end] = np.expm1(logp)
+            continue
         if graph_mode == "station":
             edge_index = _station_anchored_graph(batch_coords, anchor_coords)
             x = np.concatenate([batch_feat, anchor_feat]).astype(np.float32)
@@ -356,6 +454,7 @@ def predict_map_gnn(
     mc_passes: int = 30,
     graph_mode: str = "station",
     anchors_path: Optional[str] = None,
+    anchor_blend_m: float = 500.0,
 ) -> pd.DataFrame:
     """
     Predict Chl-a for a DataFrame of pixels (from a Sentinel-2 image).
@@ -397,6 +496,9 @@ def predict_map_gnn(
     anchors_path : str or None
         JSON con las posiciones de las boyas; por defecto
         ``{model_dir}/station_anchors.json``.
+    anchor_blend_m : float
+        Solo grafo "station": radio (m) de mezcla de conjuntos de anclas que
+        elimina las costuras rectas del mapa; 0 = asignacion dura.
 
     Returns
     -------
@@ -488,6 +590,7 @@ def predict_map_gnn(
             model, features, coords,
             scaler=scaler, knn_k=knn_k, device=device,
             graph_mode=graph_mode, anchor_coords=anchor_coords,
+            anchor_blend_m=anchor_blend_m,
         )
         result = df_pixels.copy()
         result["Chl_pred"] = preds

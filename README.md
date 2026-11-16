@@ -109,7 +109,9 @@ docker run -it --rm \
 - Predicciones recortadas a ≥ 0.2 mg/m³ (la cabeza de la GNN termina en Softplus).
 - Grafo de despliegue anclado a las boyas (`gnn.graph_mode: station`, por defecto): cada píxel
   recibe mensajes de los píxeles situados en las 5 boyas más cercanas (`gnn_models/station_anchors.json`),
-  como en el grafo de entrenamiento. El grafo antiguo de `k=8` píxeles adyacentes sigue disponible con
+  como en el grafo de entrenamiento. Para que no aparezcan costuras rectas donde cambia el conjunto
+  de las 5 boyas más cercanas, cada píxel mezcla las predicciones de los conjuntos que rigen en un
+  disco de `gnn.anchor_blend_m` metros a su alrededor (500 por defecto; 0 = asignación dura). El grafo antiguo de `k=8` píxeles adyacentes sigue disponible con
   `graph_mode: pixel` (`gnn.knn_k`), pero casi duplica el error en boyas no vistas.
 - **Fecha más cercana.** Sentinel-2 solo pasa sobre la laguna cada pocos días, así
   que la mayoría de fechas no tienen producto. Si la fecha pedida no tiene
