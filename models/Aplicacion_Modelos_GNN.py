@@ -51,6 +51,8 @@ with open(args.config, "r") as f:
 GNN_CFG = CFG.get("gnn", {})
 MODEL_NAME = GNN_CFG.get("model_name", "GraphSAGE")
 KNN_K = int(GNN_CFG.get("knn_k", 8))
+GRAPH_MODE = GNN_CFG.get("graph_mode", "station")
+ANCHORS = GNN_CFG.get("anchors_path")  # None -> {model_dir}/station_anchors.json
 DEVICE = GNN_CFG.get("device", "cpu")
 SELECTION = GNN_CFG.get("selection", {})
 
@@ -118,6 +120,8 @@ for depth, spec in SELECTION.items():
         model_name=MODEL_NAME,
         knn_k=KNN_K,
         device=DEVICE,
+        graph_mode=GRAPH_MODE,
+        anchors_path=ANCHORS,
     )
     dt = time.perf_counter() - t0
     per_depth_time[depth] = dt
@@ -142,6 +146,7 @@ try:
             "infer_per_depth_s": {d: round(per_depth_time.get(d, float("nan")), 3)
                                   for d in ["0_1", "1_2", "2_3", "3_4"]},
             "model": MODEL_NAME, "knn_k": KNN_K, "device": DEVICE,
+            "graph_mode": GRAPH_MODE,
         }, f)
 except OSError as e:
     print(f"[aviso] no se pudo escribir el sidecar de tiempos ({e})")

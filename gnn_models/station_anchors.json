@@ -1,0 +1,66 @@
+{
+ "crs": "EPSG:32630 (UTM zone 30N), metres",
+ "note": "Posiciones (mediana, redondeada a 10 m) de las 12 estaciones CTD usadas como anclas del grafo de despliegue",
+ "stations": [
+  {
+   "name": "CTD1",
+   "northing": 4187250.0,
+   "easting": 695020.0
+  },
+  {
+   "name": "CTD10",
+   "northing": 4170390.0,
+   "easting": 695650.0
+  },
+  {
+   "name": "CTD11",
+   "northing": 4169610.0,
+   "easting": 700350.0
+  },
+  {
+   "name": "CTD12",
+   "northing": 4173440.0,
+   "easting": 695410.0
+  },
+  {
+   "name": "CTD2",
+   "northing": 4181520.0,
+   "easting": 693100.0
+  },
+  {
+   "name": "CTD3",
+   "northing": 4181700.0,
+   "easting": 695240.0
+  },
+  {
+   "name": "CTD4",
+   "northing": 4180270.0,
+   "easting": 698260.0
+  },
+  {
+   "name": "CTD5",
+   "northing": 4179450.0,
+   "easting": 700270.0
+  },
+  {
+   "name": "CTD6",
+   "northing": 4176010.0,
+   "easting": 695830.0
+  },
+  {
+   "name": "CTD7",
+   "northing": 4176720.0,
+   "easting": 690400.0
+  },
+  {
+   "name": "CTD8",
+   "northing": 4174180.0,
+   "easting": 693050.0
+  },
+  {
+   "name": "CTD9",
+   "northing": 4171110.0,
+   "easting": 693180.0
+  }
+ ]
+}

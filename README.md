@@ -107,7 +107,10 @@ docker run -it --rm \
 
 - La predicción GNN corre en CPU por defecto (`config.yaml → gnn.device`).
 - Predicciones recortadas a ≥ 0.2 mg/m³ (la cabeza de la GNN termina en Softplus).
-- `k=8` vecinos en el grafo de píxeles (`gnn.knn_k`), configurable.
+- Grafo de despliegue anclado a las boyas (`gnn.graph_mode: station`, por defecto): cada píxel
+  recibe mensajes de los píxeles situados en las 5 boyas más cercanas (`gnn_models/station_anchors.json`),
+  como en el grafo de entrenamiento. El grafo antiguo de `k=8` píxeles adyacentes sigue disponible con
+  `graph_mode: pixel` (`gnn.knn_k`), pero casi duplica el error en boyas no vistas.
 - **Fecha más cercana.** Sentinel-2 solo pasa sobre la laguna cada pocos días, así
   que la mayoría de fechas no tienen producto. Si la fecha pedida no tiene
   adquisición, el pipeline busca la **más cercana** en `±search_window_days`

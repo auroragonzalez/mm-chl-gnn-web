@@ -146,6 +146,49 @@ def _build_pixel_graph(
     return np.array(sorted(edge_set), dtype=np.int64).T
 
 
+def _station_anchored_graph(
+    pix_coords: np.ndarray,
+    anchor_coords: np.ndarray,
+    spatial_k: int = 5,
+) -> np.ndarray:
+    """
+    Grafo de despliegue que reproduce los vecindarios del entrenamiento.
+
+    En entrenamiento los vecinos espaciales de un nodo son las ``spatial_k``
+    boyas mas cercanas del mismo dia (a 2-11 km). Aqui los pixeles de la
+    imagen situados en las posiciones de las boyas ("anclas") se anaden como
+    nodos extra; cada pixel recibe mensajes de sus ``spatial_k`` anclas mas
+    cercanas, y las anclas se conectan entre si como las boyas en
+    entrenamiento. Los pixeles no intercambian mensajes entre ellos: los
+    pixeles adyacentes (10-60 m) tienen reflectancias casi identicas y el
+    modelo no ve el contraste de vecindario con el que se entreno. En
+    observaciones de boya no vistas, el grafo de pixeles adyacentes casi
+    duplica el RMSLE; este grafo cuesta 0.03-0.07 (ver el articulo, sec. 7.2).
+
+    Devuelve edge_index con las anclas indexadas despues de los P pixeles.
+    """
+    P, A = len(pix_coords), len(anchor_coords)
+    k = min(spatial_k, A - 1)
+    src, dst = [], []
+    _, ia = NearestNeighbors(n_neighbors=k + 1).fit(anchor_coords).kneighbors(anchor_coords)
+    for i in range(A):
+        for j in ia[i, 1:]:
+            src += [P + j, P + i]
+            dst += [P + i, P + j]
+    _, ip = NearestNeighbors(n_neighbors=k).fit(anchor_coords).kneighbors(pix_coords)
+    src = np.concatenate([np.asarray(src, dtype=np.int64), (P + ip).ravel()])
+    dst = np.concatenate([np.asarray(dst, dtype=np.int64), np.repeat(np.arange(P), k)])
+    return np.stack([src, dst]).astype(np.int64)
+
+
+def load_station_anchors(path: str) -> np.ndarray:
+    """Posiciones de las boyas (UTM 30N, [northing, easting]) desde JSON."""
+    with open(path) as f:
+        d = json.load(f)
+    return np.array([[s["northing"], s["easting"]] for s in d["stations"]],
+                    dtype=np.float64)
+
+
 @torch.no_grad()
 def predict_pixels_gnn(
     model,
@@ -155,6 +198,8 @@ def predict_pixels_gnn(
     knn_k: int = 8,
     device: str = "cpu",
     batch_size: int = 50_000,
+    graph_mode: str = "station",
+    anchor_coords: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Run GNN inference on pixel-level features.
@@ -194,22 +239,29 @@ def predict_pixels_gnn(
     N = features.shape[0]
     all_preds = np.zeros(N, dtype=np.float32)
 
+    if graph_mode == "station":
+        if anchor_coords is None:
+            raise ValueError("graph_mode='station' necesita anchor_coords")
+        # Features de las anclas = pixel de la imagen mas cercano a cada boya
+        _, near = NearestNeighbors(n_neighbors=1).fit(coords).kneighbors(anchor_coords)
+        anchor_feat = features[near[:, 0]]
+
     # Process in batches
     for start in range(0, N, batch_size):
         end = min(start + batch_size, N)
         batch_feat = features[start:end]
         batch_coords = coords[start:end]
 
-        # Build local spatial graph
-        edge_index = _build_pixel_graph(batch_coords, k=knn_k)
+        if graph_mode == "station":
+            edge_index = _station_anchored_graph(batch_coords, anchor_coords)
+            x = np.concatenate([batch_feat, anchor_feat]).astype(np.float32)
+        else:  # legacy: grafo k-NN de pixeles adyacentes
+            edge_index = _build_pixel_graph(batch_coords, k=knn_k)
+            x = batch_feat
 
-        data = Data(
-            x=torch.from_numpy(batch_feat),
-            edge_index=torch.from_numpy(edge_index),
-        ).to(device)
-
-        preds = model(data.x, data.edge_index)
-        all_preds[start:end] = preds.cpu().numpy()
+        preds = model(torch.from_numpy(x).to(device),
+                      torch.from_numpy(edge_index).to(device))
+        all_preds[start:end] = preds[: end - start].cpu().numpy()
 
     # Clip to physical minimum (same as tabular project)
     all_preds = np.clip(all_preds, 0.2, None)
@@ -302,6 +354,8 @@ def predict_map_gnn(
     lon_col: str = "Longitude",
     uncertainty: bool = False,
     mc_passes: int = 30,
+    graph_mode: str = "station",
+    anchors_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Predict Chl-a for a DataFrame of pixels (from a Sentinel-2 image).
@@ -337,6 +391,12 @@ def predict_map_gnn(
         using MC Dropout.
     mc_passes : int
         Number of MC forward passes when uncertainty=True.
+    graph_mode : str
+        ``"station"`` (por defecto): grafo anclado a las boyas.
+        ``"pixel"``: grafo k-NN de pixeles adyacentes (version original).
+    anchors_path : str or None
+        JSON con las posiciones de las boyas; por defecto
+        ``{model_dir}/station_anchors.json``.
 
     Returns
     -------
@@ -402,6 +462,15 @@ def predict_map_gnn(
         )
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
+    anchor_coords = None
+    if graph_mode == "station":
+        anchor_coords = load_station_anchors(
+            anchors_path or os.path.join(model_dir, "station_anchors.json"))
+        if uncertainty:
+            raise NotImplementedError(
+                "MC Dropout con el grafo anclado no esta implementado; "
+                "usa graph_mode='pixel' o intervalos conformales.")
+
     # Run inference
     if uncertainty:
         preds = predict_pixels_gnn_with_uncertainty(
@@ -418,6 +487,7 @@ def predict_map_gnn(
         preds = predict_pixels_gnn(
             model, features, coords,
             scaler=scaler, knn_k=knn_k, device=device,
+            graph_mode=graph_mode, anchor_coords=anchor_coords,
         )
         result = df_pixels.copy()
         result["Chl_pred"] = preds

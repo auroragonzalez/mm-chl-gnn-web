@@ -31,7 +31,11 @@ max_cloud_cover: 20
 gnn:
   model_dir: "/app/gnn_models"
   model_name: "GraphSAGE"
-  knn_k: 8
+  # Grafo de despliegue: "station" = cada pixel recibe mensajes de los pixeles
+  # situados en las 5 boyas mas cercanas (reproduce el grafo de entrenamiento);
+  # "pixel" = grafo k-NN de pixeles adyacentes (version original, ~2x RMSLE).
+  graph_mode: "station"
+  knn_k: 8                    # solo se usa con graph_mode: "pixel"
   device: "cpu"
   # Modelos GraphSAGE entrenados sobre C2X-Complex_rhow con ventana 5x5 (la unica
   # ventana disponible para las 4 profundidades; mantener una sola ventana es
