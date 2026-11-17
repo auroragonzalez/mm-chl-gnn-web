@@ -113,6 +113,24 @@ docker run -it --rm \
   de las 5 boyas más cercanas, cada píxel mezcla las predicciones de los conjuntos que rigen en un
   disco de `gnn.anchor_blend_m` metros a su alrededor (500 por defecto; 0 = asignación dura). El grafo antiguo de `k=8` píxeles adyacentes sigue disponible con
   `graph_mode: pixel` (`gnn.knn_k`), pero casi duplica el error en boyas no vistas.
+- **Máscara de nubes por píxel** (`cloud_mask: true`, por defecto). El filtro por
+  nubosidad de la escena no basta: una escena con poca nube en el conjunto del tile
+  puede tenerla justo sobre la laguna. Por eso:
+  - Los píxeles nubosos quedan sin valor (NaN) en el mapa. Se detectan con un umbral
+    en la reflectancia TOA de B11 (1610 nm), que el agua absorbe casi por completo: un
+    píxel es nube si supera en más de 0.04 el percentil 10 de B11 sobre la laguna, o
+    0.10 en cualquier caso. El umbral es relativo a la escena porque el nivel del agua
+    despejada sube en verano por el brillo especular. La máscara se amplía medio tamaño
+    de ventana (2 píxeles con la ventana 5x5). No detecta sombras de nubes. Los
+    umbrales están al principio de `models/Aplicacion_utils.py`.
+  - También quedan sin valor los píxeles en los que C2RCC no da reflectancia de agua
+    (todas las `rhow` a 0), que la GNN rellenaría con un valor inventado.
+  - Las boyas cuyo píxel está sin dato no se usan como anclas: los píxeles de su región
+    escuchan a sus 5 anclas despejadas más cercanas. Si quedan menos de
+    `gnn.min_anchors` (5), la imagen no se predice, el mapa queda vacío y el resultado
+    se marca como no válido.
+
+  Para generar un mapa sin la máscara: `python3 run_pipeline.py --date ... --no-cloud-mask`.
 - **Fecha más cercana.** Sentinel-2 solo pasa sobre la laguna cada pocos días, así
   que la mayoría de fechas no tienen producto. Si la fecha pedida no tiene
   adquisición, el pipeline busca la **más cercana** en `±search_window_days`

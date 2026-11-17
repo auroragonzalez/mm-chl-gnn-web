@@ -263,6 +263,34 @@ def _station_anchored_graph(
     return np.stack([src, dst]).astype(np.int64)
 
 
+def usable_anchors(
+    anchor_coords: np.ndarray,
+    clear_coords: np.ndarray,
+    invalid_coords: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Mascara booleana de las anclas utilizables en esta imagen.
+
+    Las features de un ancla son las del pixel mas cercano a la boya. Si ese
+    pixel esta bajo una nube (o C2RCC no dio reflectancia), el ancla enviaria
+    mensajes con features vacias a todos los pixeles de su region; se descarta
+    y esos pixeles escuchan a sus anclas despejadas mas cercanas. Se compara la
+    distancia al pixel despejado mas cercano con la distancia al pixel
+    invalido mas cercano: gana el mas proximo (empate -> despejado), de modo
+    que las boyas que caen fuera de la rejilla conservan el comportamiento
+    de siempre cuando su pixel mas cercano esta despejado.
+    """
+    ok = np.zeros(len(anchor_coords), dtype=bool)
+    if len(clear_coords) == 0:
+        return ok
+    d_clear, _ = NearestNeighbors(n_neighbors=1).fit(clear_coords).kneighbors(anchor_coords)
+    ok[:] = True
+    if invalid_coords is not None and len(invalid_coords):
+        d_bad, _ = NearestNeighbors(n_neighbors=1).fit(invalid_coords).kneighbors(anchor_coords)
+        ok = d_clear[:, 0] <= d_bad[:, 0]
+    return ok
+
+
 def load_station_anchors(path: str) -> np.ndarray:
     """Posiciones de las boyas (UTM 30N, [northing, easting]) desde JSON."""
     with open(path) as f:
@@ -460,6 +488,8 @@ def predict_map_gnn(
     graph_mode: str = "station",
     anchors_path: Optional[str] = None,
     anchor_blend_m: float = 500.0,
+    invalid_coords: Optional[np.ndarray] = None,
+    min_anchors: int = 5,
 ) -> pd.DataFrame:
     """
     Predict Chl-a for a DataFrame of pixels (from a Sentinel-2 image).
@@ -504,6 +534,13 @@ def predict_map_gnn(
     anchor_blend_m : float
         Solo grafo "station": radio (m) de mezcla de conjuntos de anclas que
         elimina las costuras rectas del mapa; 0 = asignacion dura.
+    invalid_coords : np.ndarray (M, 2) or None
+        Solo grafo "station": coordenadas de los pixeles de la laguna sin dato
+        (nube o fallo de C2RCC), que no estan en ``df_pixels``. Las anclas cuyo
+        pixel mas cercano es uno de ellos se descartan (ver ``usable_anchors``).
+    min_anchors : int
+        Solo grafo "station": si quedan menos anclas despejadas, la imagen no se
+        puede predecir con fiabilidad y ``Chl_pred`` se devuelve entera a NaN.
 
     Returns
     -------
@@ -573,6 +610,16 @@ def predict_map_gnn(
     if graph_mode == "station":
         anchor_coords = load_station_anchors(
             anchors_path or os.path.join(model_dir, "station_anchors.json"))
+        ok = usable_anchors(anchor_coords, coords, invalid_coords)
+        if not ok.all():
+            logger.warning(f"{int((~ok).sum())} de {len(ok)} anclas sin dato (nube) se descartan")
+        anchor_coords = anchor_coords[ok]
+        if len(anchor_coords) < min_anchors:
+            logger.warning(f"Solo {len(anchor_coords)} anclas despejadas (< {min_anchors}): "
+                           f"no se predice esta imagen")
+            result = df_pixels.copy()
+            result["Chl_pred"] = np.nan
+            return result
         if uncertainty:
             raise NotImplementedError(
                 "MC Dropout con el grafo anclado no esta implementado; "

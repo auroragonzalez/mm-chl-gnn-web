@@ -11,9 +11,65 @@ import geopandas as gpd
 import json
 from typing import Optional
 from joblib import load as joblib_load
+from scipy.ndimage import binary_dilation
+
+# Mascara de nubes por umbral en el SWIR (misma regla que el pipeline tabular)
+B11_INDEX = 11            # rtoa_B11 es la banda 12 (Band_12) del TIFF de SNAP
+CLOUD_B11_OFFSET = 0.04   # margen sobre el nivel del agua despejada de la escena
+CLOUD_B11_MAX = 0.10      # por encima siempre se considera nube (escenas casi cubiertas)
+# Bandas rhow del TIFF de SNAP (Band_14..Band_21); C2RCC las pone a 0 donde falla
+RHOW_BANDS = [f"Band_{i}" for i in range(14, 22)]
 
 
-def extract_pixels_in_marmenor(folder_path, target_dates, grouping, net_set, polygon_path):
+def build_cloud_mask(bands, water, buffer_px):
+    """
+    Mascara de nubes (True = nube) a partir de la reflectancia TOA en B11 (1610 nm).
+    El agua absorbe casi toda la radiacion a esa longitud de onda, sea cual sea la
+    turbidez o el fondo, asi que las nubes destacan claramente. El nivel del agua
+    despejada cambia con la estacion (en verano el brillo especular lo sube hasta
+    ~0.05), por lo que el umbral es relativo a la escena: el percentil 10 de B11 sobre
+    la laguna mas CLOUD_B11_OFFSET, con tope en CLOUD_B11_MAX para que una escena casi
+    cubierta (en la que el percentil 10 ya es nube) siga enmascarandose.
+
+    Solo se buscan nubes sobre el agua: en tierra B11 es alto de por si y, al ampliar
+    la mascara, eliminaria una franja costera. La mascara se amplia buffer_px pixeles
+    para que ninguna ventana restante contenga pixeles nubosos. No detecta sombras.
+
+    Returns:
+        (mascara booleana (height, width), umbral aplicado), o (None, None) si no hay
+        pixeles validos en la laguna
+    """
+    b11 = bands[B11_INDEX]
+    valid = water & np.isfinite(b11)
+    if not valid.any():
+        return None, None
+    threshold = min(np.percentile(b11[valid], 10) + CLOUD_B11_OFFSET, CLOUD_B11_MAX)
+    clouds = valid & (b11 > threshold)
+    if buffer_px > 0:
+        clouds = binary_dilation(clouds, structure=np.ones((2 * buffer_px + 1, 2 * buffer_px + 1), dtype=bool))
+    return clouds, threshold
+
+
+def mask_invalid_rhow(df):
+    """
+    Pone a NaN todas las bandas de los pixeles en los que C2RCC no dio reflectancia
+    de agua (todas las rhow <= 0 o no finitas: nubes, brillo, fallo de la inversion).
+    Con esas bandas las features son 0/NaN y la GNN devolveria un valor inventado.
+    Devuelve (df, numero de pixeles anulados).
+    """
+    cols = [c for c in RHOW_BANDS if c in df.columns]
+    if not cols:
+        return df, 0
+    rh = df[cols].to_numpy(dtype=np.float64)
+    bad = ~(np.isfinite(rh) & (rh > 0)).any(axis=1)
+    if bad.any():
+        df = df.copy()
+        band_cols = [c for c in df.columns if c.startswith("Band_")]
+        df.loc[bad, band_cols] = np.nan
+    return df, int(bad.sum())
+
+
+def extract_pixels_in_marmenor(folder_path, target_dates, grouping, net_set, polygon_path, cloud_mask=False):
     """
     Extrae valores de píxeles dentro del área del Mar Menor a partir de GeoTIFFs y un polígono de máscara.
 
@@ -23,6 +79,10 @@ def extract_pixels_in_marmenor(folder_path, target_dates, grouping, net_set, pol
         grouping: tamaño de agrupamiento ("1x1", "3x3", "5x5", etc.)
         net_set: prefijo del conjunto (C2X-Complex, C2X, C2RCC)
         polygon_path: ruta al archivo GeoJSON o Shapefile del Mar Menor
+        cloud_mask: si es True se aplica la mascara de nubes por umbral en B11 (ver
+            build_cloud_mask) y los pixeles nubosos se devuelven con todas las bandas a
+            NaN, para que no reciban prediccion pero sigan formando parte de la rejilla
+            del mapa
 
     Returns:
         pd.DataFrame con bandas y coordenadas por píxel
@@ -80,12 +140,23 @@ def extract_pixels_in_marmenor(folder_path, target_dates, grouping, net_set, pol
             else:
                 offset = 0
 
+            # Mascara de nubes, ampliada medio tamano de ventana
+            clouds = None
+            if cloud_mask:
+                clouds, threshold = build_cloud_mask(bands, mask, buffer_px=offset)
+                if clouds is not None:
+                    print(f"Mascara de nubes (B11 > {threshold:.4f}): {int((clouds & mask).sum())} de "
+                          f"{int(mask.sum())} pixeles del Mar Menor quedan sin valor")
+
             # Iterar sobre todos los píxeles dentro del polígono
             idxs = np.argwhere(mask)
 
             for row_idx, col_idx in idxs:
                 try:
-                    if offset > 0:
+                    if clouds is not None and clouds[row_idx, col_idx]:
+                        # Mismo dtype que las bandas para no alterar el formato del CSV
+                        values = np.full(bands.shape[0], np.nan, dtype=bands.dtype)
+                    elif offset > 0:
                         row_start = max(row_idx - offset, 0)
                         row_end = min(row_idx + offset + 1, dataset.height)
                         col_start = max(col_idx - offset, 0)

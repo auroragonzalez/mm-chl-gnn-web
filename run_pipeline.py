@@ -21,6 +21,8 @@ from datetime import datetime
 parser = argparse.ArgumentParser()
 parser.add_argument("--date", required=True)
 parser.add_argument("--config", default="config.yaml")
+parser.add_argument("--no-cloud-mask", action="store_true",
+                    help="No aplicar la mascara de nubes (por defecto se aplica si config.yaml -> cloud_mask)")
 args = parser.parse_args()
 
 with open(args.config, "r") as f:
@@ -30,6 +32,7 @@ requested_date = args.date
 fecha = args.date
 search_window_days = int(cfg.get("search_window_days", 0))
 max_cloud_cover = float(cfg.get("max_cloud_cover", 100))
+cloud_mask = bool(cfg.get("cloud_mask", True)) and not args.no_cloud_mask
 safe_dir = cfg.get("safe_dir")
 snap_dir = cfg.get("snap_dir")
 pred_dir = cfg.get("pred_dir")
@@ -85,7 +88,8 @@ t5 = time.time()
 subprocess.run(
     ["python3", "models/Aplicacion_Modelos_GNN.py",
      "--date", fecha, "--input", snap_dir, "--models", gnn_model_dir,
-     "--pred", pred_dir, "--geojson", geojson_file, "--config", args.config],
+     "--pred", pred_dir, "--geojson", geojson_file, "--config", args.config]
+    + (["--cloud-mask"] if cloud_mask else []),
     check=True,
 )
 t_predict = time.time() - t5

@@ -23,6 +23,12 @@ search_window_days: 7
 # el filtro se ignora (solo cercania).
 max_cloud_cover: 20
 
+# Mascara de nubes por pixel: los pixeles nubosos de la laguna (umbral en la
+# reflectancia TOA de B11) y aquellos en los que C2RCC no da reflectancia de agua
+# quedan sin valor en el mapa, y las boyas bajo nube no se usan como anclas.
+# `run_pipeline.py --no-cloud-mask` la desactiva para una ejecucion.
+cloud_mask: true
+
 # === Configuracion de la GNN ===============================================
 # Los checkpoints entrenados (.pt + _config.json + _scaler.pkl + _feature_cols.json)
 # se montan en `model_dir` al ejecutar el contenedor (no van en git). Ajusta
@@ -38,6 +44,8 @@ gnn:
   # Radio (m) de mezcla de conjuntos de anclas: suaviza las costuras rectas donde
   # cambia el conjunto de las 5 boyas mas cercanas. 0 = asignacion dura.
   anchor_blend_m: 500
+  # Con menos boyas despejadas que esto la imagen no se predice (mapa sin datos).
+  min_anchors: 5
   knn_k: 8                    # solo se usa con graph_mode: "pixel"
   device: "cpu"
   # Modelos GraphSAGE entrenados sobre C2X-Complex_rhow con ventana 5x5 (la unica

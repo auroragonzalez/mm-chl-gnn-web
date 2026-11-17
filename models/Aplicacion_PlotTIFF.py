@@ -67,10 +67,10 @@ for depth in depths:
         nodata = src.nodata
 
     # Enmascarar nodata / NaN
-    if nodata is not None:
+    # (nodata es NaN en nuestros TIFF y masked_equal(NaN) no enmascara nada)
+    data = np.ma.masked_invalid(data)
+    if nodata is not None and np.isfinite(nodata):
         data = np.ma.masked_equal(data, nodata)
-    else:
-        data = np.ma.masked_invalid(data)
 
     # Reproyectar KML al CRS del raster
     bathymetry_proj = bathymetry_gdf.to_crs(raster_crs)
