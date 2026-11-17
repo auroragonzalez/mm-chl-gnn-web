@@ -329,6 +329,10 @@ def predict_pixels_gnn(
         _, near = NearestNeighbors(n_neighbors=1).fit(coords).kneighbors(anchor_coords)
         anchor_feat = features[near[:, 0]]
 
+    if graph_mode == "station" and anchor_blend_m > 0:
+        # Conjuntos de anclas de toda la imagen (en cache: mismos para las 4 profundidades)
+        blend_rows = _blended_anchor_sets(coords, anchor_coords, radius=anchor_blend_m)
+
     # Process in batches
     for start in range(0, N, batch_size):
         end = min(start + batch_size, N)
@@ -337,8 +341,9 @@ def predict_pixels_gnn(
 
         if graph_mode == "station" and anchor_blend_m > 0:
             # Mezcla de conjuntos de anclas (sin costuras), en espacio log1p
-            rp, rs, rw = _blended_anchor_sets(batch_coords, anchor_coords,
-                                              radius=anchor_blend_m)
+            lo, hi = np.searchsorted(blend_rows[0], [start, end])
+            rp = blend_rows[0][lo:hi] - start
+            rs, rw = blend_rows[1][lo:hi], blend_rows[2][lo:hi]
             edge_index = _station_anchored_graph(batch_coords[rp], anchor_coords,
                                                  pix_sets=rs)
             x = np.concatenate([batch_feat[rp], anchor_feat]).astype(np.float32)
