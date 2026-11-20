@@ -107,12 +107,19 @@ docker run -it --rm \
 
 - La predicción GNN corre en CPU por defecto (`config.yaml → gnn.device`).
 - Predicciones recortadas a ≥ 0.2 mg/m³ (la cabeza de la GNN termina en Softplus).
-- Grafo de despliegue anclado a las boyas (`gnn.graph_mode: station`, por defecto): cada píxel
-  recibe mensajes de los píxeles situados en las 5 boyas más cercanas (`gnn_models/station_anchors.json`),
-  como en el grafo de entrenamiento. Para que no aparezcan costuras rectas donde cambia el conjunto
-  de las 5 boyas más cercanas, cada píxel mezcla las predicciones de los conjuntos que rigen en un
-  disco de `gnn.anchor_blend_m` metros a su alrededor (500 por defecto; 0 = asignación dura). El grafo antiguo de `k=8` píxeles adyacentes sigue disponible con
-  `graph_mode: pixel` (`gnn.knn_k`), pero casi duplica el error en boyas no vistas.
+- **Grafo de despliegue** (`gnn.graph_mode`). Hay dos opciones y ninguna es mejor en todo:
+  - `pixel` (por defecto): cada píxel recibe mensajes de sus `gnn.knn_k` = 8 píxeles
+    adyacentes. El mapa conserva el detalle espacial de la reflectancia, con algo de ruido
+    de sal y pimienta y valores altos espurios junto a la costa en las capas profundas. En
+    boyas no vistas, un grafo de este tipo casi duplica el error.
+  - `station`: cada píxel recibe mensajes de los píxeles situados en las 5 boyas más cercanas
+    (`gnn_models/station_anchors.json`), como en el grafo de entrenamiento. Es el que mejor
+    acierta en las boyas, pero todos los píxeles de una región reciben los mismos mensajes y
+    el mapa sale mucho más uniforme. Para que no aparezcan costuras rectas donde cambia el
+    conjunto de las 5 boyas más cercanas, cada píxel mezcla las predicciones de los conjuntos
+    que rigen en un disco de `gnn.anchor_blend_m` metros (500; 0 = asignación dura).
+
+  Entre boyas no hay datos in situ que digan cuál de los dos mapas es más fiel.
 - **Máscara de nubes por píxel** (`cloud_mask: true`, por defecto). El filtro por
   nubosidad de la escena no basta: una escena con poca nube en el conjunto del tile
   puede tenerla justo sobre la laguna. Por eso:
@@ -125,7 +132,7 @@ docker run -it --rm \
     umbrales están al principio de `models/Aplicacion_utils.py`.
   - También quedan sin valor los píxeles en los que C2RCC no da reflectancia de agua
     (todas las `rhow` a 0), que la GNN rellenaría con un valor inventado.
-  - Las boyas cuyo píxel está sin dato no se usan como anclas: los píxeles de su región
+  - Con `graph_mode: station`, las boyas cuyo píxel está sin dato no se usan como anclas: los píxeles de su región
     escuchan a sus 5 anclas despejadas más cercanas. Si quedan menos de
     `gnn.min_anchors` (5), la imagen no se predice, el mapa queda vacío y el resultado
     se marca como no válido.

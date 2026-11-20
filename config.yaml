@@ -37,16 +37,20 @@ cloud_mask: true
 gnn:
   model_dir: "/app/gnn_models"
   model_name: "GraphSAGE"
-  # Grafo de despliegue: "station" = cada pixel recibe mensajes de los pixeles
-  # situados en las 5 boyas mas cercanas (reproduce el grafo de entrenamiento);
-  # "pixel" = grafo k-NN de pixeles adyacentes (version original, ~2x RMSLE).
-  graph_mode: "station"
-  # Radio (m) de mezcla de conjuntos de anclas: suaviza las costuras rectas donde
-  # cambia el conjunto de las 5 boyas mas cercanas. 0 = asignacion dura.
-  anchor_blend_m: 500
-  # Con menos boyas despejadas que esto la imagen no se predice (mapa sin datos).
-  min_anchors: 5
+  # Grafo de despliegue:
+  # "pixel" = grafo k-NN de pixeles adyacentes: conserva el detalle espacial de la
+  #   reflectancia de cada pixel; en boyas no vistas el error es mayor.
+  # "station" = cada pixel recibe mensajes de los pixeles situados en las 5 boyas
+  #   mas cercanas (reproduce el grafo de entrenamiento y acierta mas en las
+  #   boyas), pero el mapa sale mucho mas uniforme dentro de cada region.
+  # Entre boyas no hay datos in situ que digan cual de los dos mapas es mas fiel.
+  graph_mode: "pixel"
   knn_k: 8                    # solo se usa con graph_mode: "pixel"
+  # Solo graph_mode "station": radio (m) de mezcla de conjuntos de anclas, que
+  # suaviza las costuras rectas donde cambia el conjunto de las 5 boyas mas
+  # cercanas (0 = asignacion dura); y minimo de boyas despejadas para predecir.
+  anchor_blend_m: 500
+  min_anchors: 5
   device: "cpu"
   # Modelos GraphSAGE entrenados sobre C2X-Complex_rhow con ventana 5x5 (la unica
   # ventana disponible para las 4 profundidades; mantener una sola ventana es
